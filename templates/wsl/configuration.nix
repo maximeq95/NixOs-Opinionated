@@ -20,8 +20,6 @@
     };
   };
 
-  wsl.defaultUser = "alice";
-
   # Role-specific options and any other Home Manager setting:
   # home-manager.users.alice.opinionated.roles.ops.azure.enable = true;
 }

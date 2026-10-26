@@ -42,7 +42,6 @@ let
             };
           };
         };
-        wsl.defaultUser = "alice";
         home-manager.users.alice.opinionated.roles.ops.azure.enable = true;
       }
     ];
@@ -68,4 +67,30 @@ lib.mapAttrs evalCheck configurations
     find . -name '*.nix' -exec nixfmt --check {} +
     touch $out
   '';
+
+  wsl-default-user =
+    let
+      defaultUserOf =
+        users:
+        (mkSystem [
+          {
+            opinionated = {
+              wsl.enable = true;
+              inherit users;
+            };
+          }
+        ]).config.wsl.defaultUser;
+      single = defaultUserOf { alice = { }; };
+      several = defaultUserOf {
+        alice = { };
+        bob = { };
+      };
+    in
+    assert lib.assertMsg (
+      single == "alice"
+    ) "single user should be the WSL default user, got ${single}";
+    assert lib.assertMsg (
+      several == "nixos"
+    ) "several users should keep the NixOS-WSL default, got ${several}";
+    pkgs.writeText "wsl-default-user" "ok";
 }
