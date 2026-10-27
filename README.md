@@ -15,7 +15,8 @@ Importing two platform modules is an evaluation error.
 | :--- | :--- |
 | `nixosModules.wsl` | The core, plus NixOS-WSL (module included), Windows `$PATH` kept out, Windows GPU driver, `wsl.defaultUser` set to the only user of `opinionated.users` when exactly one is declared. |
 | `nixosModules.core` | Platform-agnostic part, included in every platform module; import it alone for a host not covered by a platform. |
-| `homeModules.roles` | The roles, for standalone Home Manager use (`opinionated.roles.<role>.enable`). |
+| `homeModules.roles` | The roles, for standalone Home Manager use (`opinionated.roles.<role>.enable`); needs `overlays.default` applied to its `pkgs`. |
+| `overlays.default` | The packages of this flake (see [Packages](#packages)); applied by the core. |
 
 The core provides:
 
@@ -32,26 +33,28 @@ The core provides:
 
 ### Adding a platform
 
-Create `modules/nixos/platforms/<name>.nix`. It is discovered automatically
-and exposed as `nixosModules.<name>` (core included). It is a function of the
-flake inputs returning a module, which must set `opinionated.platform`:
+Create `modules/platforms/<name>.nix` (any file under `modules/` works, see
+[Development](#development)). It registers the platform and contributes its
+NixOS settings to `flake.modules.nixos.<name>`, exposed as
+`nixosModules.<name>` with the core included and `opinionated.platform` set:
 
 ```nix
-{ inputs }:
-{ config, lib, ... }:
 {
-  config = {
-    opinionated.platform = "bare";
-    users.users = lib.mapAttrs (_: _: {
-      isNormalUser = true;
-      extraGroups = [ "wheel" ];
-    }) config.opinionated.users;
-  };
+  opinionated.platforms.bare = { };
+
+  flake.modules.nixos.bare =
+    { config, lib, ... }:
+    {
+      users.users = lib.mapAttrs (_: _: {
+        isNormalUser = true;
+        extraGroups = [ "wheel" ];
+      }) config.opinionated.users;
+    };
 }
 ```
 
 `nix flake check` evaluates every platform with every role enabled; settings a
-platform needs only for that test go in `platformFixtures` in `checks.nix`.
+platform needs only for that test go in `opinionated.platforms.<name>.checkModule`.
 Add a matching `templates/<name>` directory to get a `nix flake init` template.
 
 ### Options
@@ -82,30 +85,48 @@ extras and packages, IntelliJ plugins, unfree packages).
 
 ### Adding a role
 
-1. Create `modules/home/roles/<name>.nix` (or `<name>/default.nix`). It is
-   discovered automatically and becomes a valid value of
-   `opinionated.users.<user>.roles`.
-2. Declare `options.opinionated.roles.<name>.enable` and guard its config with
-   it:
+Create `modules/roles/<name>.nix` (or several files, like
+`modules/roles/base/`). Registering the role in `opinionated.roles.<name>`
+makes it a valid value of `opinionated.users.<user>.roles` and declares the
+Home Manager option `opinionated.roles.<name>.enable`; the role contributes
+its settings to `flake.modules.homeManager.roles`, guarded by that option:
 
-   ```nix
-   { config, lib, pkgs, ... }:
-   let
-     cfg = config.opinionated.roles.data;
-   in
-   {
-     options.opinionated.roles.data.enable = lib.mkEnableOption "the data role";
+```nix
+{
+  opinionated.roles.data.description = "DuckDB, Python";
 
-     config = lib.mkIf cfg.enable {
-       home.packages = [ pkgs.duckdb ];
-       programs.zsh.oh-my-zsh.plugins = [ "python" ];
-       opinionated.unfreePackages = [ ];
-     };
-   }
-   ```
+  flake.modules.homeManager.roles =
+    { config, lib, pkgs, ... }:
+    {
+      config = lib.mkIf config.opinionated.roles.data.enable {
+        home.packages = [ pkgs.duckdb ];
+        programs.zsh.oh-my-zsh.plugins = [ "python" ];
+        opinionated.unfreePackages = [ ];
+      };
+    };
+}
+```
 
-Flake inputs are available to roles as the `opinionatedInputs` module
-argument. `nix flake check` evaluates a system with every role enabled.
+A role needing NixOS settings contributes them to `flake.modules.nixos.core`
+from the same file (see `modules/roles/base/shell.nix`). Flake inputs are
+available as the `inputs` argument of the file (the flake-parts module), not
+of the inner modules. `nix flake check` evaluates a system with every role
+enabled.
+
+## Packages
+
+The packages of this flake are distributed through `overlays.default`, which
+the core applies to the system (and so to Home Manager, through
+`useGlobalPkgs`). Modules extend them with `.override` rather than defining
+new derivations:
+
+| Package | Overrides |
+| :--- | :--- |
+| `intellij-idea-with-plugins` | `pluginIds` (JetBrains Marketplace IDs, resolved by [nix-jetbrains-plugins](https://github.com/nix-community/nix-jetbrains-plugins)), `intellij-idea` (e.g. `intellij-idea-oss`) |
+
+A package lives in `pkgs/<name>/package.nix`, written for `callPackage`; the
+module adding it (`modules/packages/<name>.nix`) contributes
+`overlays.<name>`, which `overlays.default` composes with the others.
 
 ## Usage
 
@@ -147,6 +168,26 @@ or, by hand:
 With `nixosModules.core` alone, the user account itself
 (`users.users.<name>.isNormalUser`, …) must be declared by your configuration.
 
+Standalone Home Manager has no system to apply the overlay and allow unfree
+packages: give it a `pkgs` that does both.
+
+```nix
+homeConfigurations.alice = home-manager.lib.homeManagerConfiguration {
+  pkgs = import nixpkgs {
+    system = "x86_64-linux";
+    overlays = [ opinionated.overlays.default ];
+    config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "terraform" ];
+  };
+  modules = [
+    opinionated.homeModules.roles
+    {
+      home = { username = "alice"; homeDirectory = "/home/alice"; stateVersion = "26.05"; };
+      opinionated.roles = { base.enable = true; ops.enable = true; };
+    }
+  ];
+};
+```
+
 ## LazyVim
 
 Neovim comes from [`pfassina/lazyvim-nix`](https://github.com/pfassina/lazyvim-nix):
@@ -162,6 +203,25 @@ home-manager.users.alice.programs.lazyvim.extras.lang.go = {
 ```
 
 ## Development
+
+The flake follows the [dendritic pattern](https://github.com/mightyiam/dendritic):
+every file under `modules/` is a [flake-parts](https://flake.parts) module,
+imported by [import-tree](https://github.com/denful/import-tree) (paths
+containing `/_` are skipped). A file is a feature, which contributes to
+every configuration class it touches, e.g. `modules/roles/base/git.nix`
+declares the NixOS `opinionated.users.<name>.git` options and the Home
+Manager git settings. File names and locations carry no meaning: move or
+split files freely.
+
+| Path | Contents |
+| :--- | :--- |
+| `modules/flake-parts.nix` | Systems; publishes `flake.modules.{nixos,homeManager}` as `nixosModules`/`homeModules`. |
+| `modules/roles.nix`, `modules/platforms.nix` | Role and platform registries (`opinionated.roles`, `opinionated.platforms`). |
+| `modules/overlays.nix` | `overlays.default`, applied by the core. |
+| `modules/core/` | System defaults, Home Manager integration, unfree packages. |
+| `modules/roles/`, `modules/platforms/` | One role or platform per file or directory. |
+| `modules/packages/` | One overlay per package of `pkgs/`. |
+| `modules/checks.nix`, `modules/formatter.nix`, `modules/templates.nix` | Check helpers (`checkLib`), formatter, templates. |
 
 ```bash
 nix flake check   # evaluates test systems and checks formatting
