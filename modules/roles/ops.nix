@@ -1,8 +1,10 @@
 # Ops role: Kubernetes, Helm, Flux, Terraform and (optionally) Azure tooling.
+{ config, ... }:
+let
+  inherit (config.flake.modules) homeManager;
+in
 {
-  opinionated.roles.ops.description = "Kubernetes, Helm, Flux, Terraform";
-
-  flake.modules.homeManager.roles =
+  flake.modules.homeManager.ops =
     {
       config,
       lib,
@@ -10,13 +12,14 @@
       ...
     }:
     let
-      cfg = config.opinionated.roles.ops;
+      cfg = config.roles.ops;
     in
     {
-      options.opinionated.roles.ops.azure.enable =
-        lib.mkEnableOption "Azure CLI and its oh-my-zsh plugin";
+      imports = [ homeManager.common ];
 
-      config = lib.mkIf cfg.enable {
+      options.roles.ops.azure.enable = lib.mkEnableOption "Azure CLI and its oh-my-zsh plugin";
+
+      config = {
         home.packages =
           with pkgs;
           [
@@ -41,7 +44,7 @@
         };
 
         # Pulled in by the LazyVim `lang.terraform` extra.
-        opinionated.unfreePackages = [ "terraform" ];
+        roles.unfreePackages = [ "terraform" ];
       };
     };
 }

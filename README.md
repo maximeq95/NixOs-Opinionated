@@ -1,163 +1,97 @@
-# NixOs-opinionated
+# NixOs-Opinionated
 
-Opinionated, modular NixOS + Home Manager configuration. Import the module of
-your **platform** (currently `wsl`), and give each user a list of **roles**.
+NixOS + Home Manager modules for development machines. Import the module of
+your **platform** (currently `wsl`) and give each user **roles**: sets of
+tools and settings that compose (shell, ops, dev, AI tooling).
 
-Every value is a default: anything can be overridden from your own
-configuration (use `lib.mkForce` for values set at normal priority).
+Every module is published under `modules.<class>.<name>`, the output
+[dendritic](https://github.com/mightyiam/dendritic) flakes consume, and
+under the classic `nixosModules` / `homeModules`. Importing a module enables
+it, and every value is a default on the upstream NixOS and Home Manager
+options: override them where you would anyway (`lib.mkForce` for values set
+at normal priority).
 
-## Modules
+## Quick start
 
-A host imports exactly one platform module; there is no default one.
-Importing two platform modules is an evaluation error.
-
-| Output | Provides |
-| :--- | :--- |
-| `nixosModules.wsl` | The core, plus NixOS-WSL (module included), Windows `$PATH` kept out, Windows GPU driver, `wsl.defaultUser` set to the only user of `opinionated.users` when exactly one is declared. |
-| `nixosModules.core` | Platform-agnostic part, included in every platform module; import it alone for a host not covered by a platform. |
-| `homeModules.roles` | The roles, for standalone Home Manager use (`opinionated.roles.<role>.enable`); needs `overlays.default` applied to its `pkgs`. |
-| `overlays.default` | The packages of this flake (see [Packages](#packages)); applied by the core. |
-
-The core provides:
-
-- **system defaults** (`opinionated.system.enable`, on by default): flakes +
-  `nix-command`, `configurable-impure-env` (`NIX_CURL_FLAGS`), `root`/`@wheel`
-  trusted users, `nh` with weekly `nh clean` (keeps 14 days) and store
-  optimisation, JetBrains Mono Nerd Font, `Europe/Paris` time zone;
-- **Home Manager** (module included, `useGlobalPkgs`, `useUserPackages`) for
-  the users of `opinionated.users`, with their roles, zsh as login shell for
-  `base` users and unfree packages allowed per role.
-
-> The modules already import NixOS-WSL and Home Manager: do not import them a
-> second time.
-
-### Adding a platform
-
-Create `modules/platforms/<name>.nix` (any file under `modules/` works, see
-[Development](#development)). It registers the platform and contributes its
-NixOS settings to `flake.modules.nixos.<name>`, exposed as
-`nixosModules.<name>` with the core included and `opinionated.platform` set:
-
-```nix
-{
-  opinionated.platforms.bare = { };
-
-  flake.modules.nixos.bare =
-    { config, lib, ... }:
-    {
-      users.users = lib.mapAttrs (_: _: {
-        isNormalUser = true;
-        extraGroups = [ "wheel" ];
-      }) config.opinionated.users;
-    };
-}
+```bash
+# A dendritic flake (flake-parts + import-tree):
+nix flake init -t github:pchesneau/NixOs-Opinionated#dendritic
+# A classic flake:
+nix flake init -t github:pchesneau/NixOs-Opinionated#wsl
 ```
 
-`nix flake check` evaluates every platform with every role enabled; settings a
-platform needs only for that test go in `opinionated.platforms.<name>.checkModule`.
-Add a matching `templates/<name>` directory to get a `nix flake init` template.
+There are two places to configure a user, and one rule:
 
-### Options
-
-| Option | Default | Description |
-| :--- | :--- | :--- |
-| `opinionated.platform` | set by the platform module | Read-only platform of the host. |
-| `opinionated.system.enable` | `true` | System defaults. |
-| `opinionated.system.flakePath` | `"/etc/nixos"` | Flake used by `nh os switch` without arguments. |
-| `opinionated.system.clean.{enable,dates,keepSince}` | `true`, `"weekly"`, `"14d"` | Store cleanup schedule. |
-| `opinionated.users.<name>.roles` | `[ "base" ]` | Roles of the user. |
-| `opinionated.users.<name>.git.{userName,userEmail}` | `null` | Git identity. |
-| `opinionated.users.<name>.homeDirectory` | `/home/<name>` | Home directory. |
-| `opinionated.unfreePackages` | roles' needs | Allowed unfree package names; add yours here. |
-| `opinionated.manageUnfreePackages` | `true` | Set to `false` to provide your own `allowUnfreePredicate`. |
-
-## Roles
-
-| Role | Content | Options (`home-manager.users.<name>.opinionated.roles.<role>`) |
-| :--- | :--- | :--- |
-| `base` | zsh (oh-my-zsh, autosuggestions, syntax highlighting), Starship (Catppuccin Mocha), Zellij, git + delta, direnv + nix-direnv, eza, zoxide, fzf, bat, ripgrep, fd, jq, keychain, LazyVim (nix, json, yaml, markdown) | `git.{userName,userEmail}` |
-| `ops` | kubectl, Helm, Flux, oh-my-zsh kubectl/kubectx/helm/terraform/ansible plugins, LazyVim terraform extra | `azure.enable` (default `false`) |
-| `dev` | IntelliJ IDEA with plugins, `jdt-language-server` for LazyVim | `intellij.enable`, `intellij.plugins` |
-| `llm` | AI CLI of the selected provider; AI plugins in IntelliJ when `dev` is enabled | `provider` (`"github-copilot"`), `intellijPlugins` |
-
-Roles are composable: they append to shared lists (oh-my-zsh plugins, LazyVim
-extras and packages, IntelliJ plugins, unfree packages).
-
-### Adding a role
-
-Create `modules/roles/<name>.nix` (or several files, like
-`modules/roles/base/`). Registering the role in `opinionated.roles.<name>`
-makes it a valid value of `opinionated.users.<user>.roles` and declares the
-Home Manager option `opinionated.roles.<name>.enable`; the role contributes
-its settings to `flake.modules.homeManager.roles`, guarded by that option:
-
-```nix
-{
-  opinionated.roles.data.description = "DuckDB, Python";
-
-  flake.modules.homeManager.roles =
-    { config, lib, pkgs, ... }:
-    {
-      config = lib.mkIf config.opinionated.roles.data.enable {
-        home.packages = [ pkgs.duckdb ];
-        programs.zsh.oh-my-zsh.plugins = [ "python" ];
-        opinionated.unfreePackages = [ ];
-      };
-    };
-}
-```
-
-A role needing NixOS settings contributes them to `flake.modules.nixos.core`
-from the same file (see `modules/roles/base/shell.nix`). Flake inputs are
-available as the `inputs` argument of the file (the flake-parts module), not
-of the inner modules. `nix flake check` evaluates a system with every role
-enabled.
-
-## Packages
-
-The packages of this flake are distributed through `overlays.default`, which
-the core applies to the system (and so to Home Manager, through
-`useGlobalPkgs`). Modules extend them with `.override` rather than defining
-new derivations:
-
-| Package | Overrides |
-| :--- | :--- |
-| `intellij-idea-with-plugins` | `pluginIds` (JetBrains Marketplace IDs, resolved by [nix-jetbrains-plugins](https://github.com/nix-community/nix-jetbrains-plugins)), `intellij-idea` (e.g. `intellij-idea-oss`) |
-
-A package lives in `pkgs/<name>/package.nix`, written for `callPackage`; the
-module adding it (`modules/packages/<name>.nix`) contributes
-`overlays.<name>`, which `overlays.default` composes with the others.
+- **`roles.users.<name>`** (NixOS) lists the roles of the user;
+- **`home-manager.users.<name>`** holds everything else about that user: the
+  options of their roles (`roles.<role>.*`) and any Home Manager setting.
 
 ## Usage
 
-```bash
-nix flake init -t github:pchesneau/NixOs-opinionated#wsl
+### From a dendritic flake
+
+The host is one of your `flake.modules.nixos.*` modules, which imports a
+platform module of this flake:
+
+```nix
+# modules/hosts/workstation.nix
+{ config, inputs, ... }:
+{
+  flake.modules.nixos.workstation = {
+    imports = [ inputs.nixos-roles.modules.nixos.wsl ];
+
+    system.stateVersion = "26.05";
+    roles.users.alice = [ "base" "ops" "dev" ];
+    home-manager.users.alice.imports = [ config.flake.modules.homeManager.alice ];
+  };
+
+  flake.nixosConfigurations.workstation = inputs.nixpkgs.lib.nixosSystem {
+    modules = [
+      config.flake.modules.nixos.workstation
+      { nixpkgs.hostPlatform = "x86_64-linux"; }
+    ];
+  };
+}
 ```
 
-or, by hand:
+```nix
+# modules/users/alice.nix
+{
+  flake.modules.homeManager.alice = {
+    programs.git.settings.user = { name = "Alice"; email = "alice@example.com"; };
+    roles.ops.azure.enable = true;
+  };
+}
+```
+
+A role is an ordinary Home Manager module: `roles.users` imports it for you,
+and you can also import it yourself
+(`imports = [ inputs.nixos-roles.modules.homeManager.llm ]`).
+
+### From a classic flake
 
 ```nix
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    opinionated = {
-      url = "github:pchesneau/NixOs-opinionated";
+    nixos-roles = {
+      url = "github:pchesneau/NixOs-Opinionated";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { nixpkgs, opinionated, ... }: {
+  outputs = { nixpkgs, nixos-roles, ... }: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        opinionated.nixosModules.wsl
+        nixos-roles.nixosModules.wsl
         {
           system.stateVersion = "26.05";
-          opinionated.users.alice = {
-            roles = [ "base" "ops" "dev" "llm" ];
-            git = { userName = "Alice"; userEmail = "alice@example.com"; };
+          roles.users.alice = [ "base" "ops" "dev" "llm" ];
+          home-manager.users.alice = {
+            programs.git.settings.user = { name = "Alice"; email = "alice@example.com"; };
+            roles.ops.azure.enable = true;
           };
-          home-manager.users.alice.opinionated.roles.ops.azure.enable = true;
         }
       ];
     };
@@ -165,33 +99,80 @@ or, by hand:
 }
 ```
 
-With `nixosModules.core` alone, the user account itself
-(`users.users.<name>.isNormalUser`, …) must be declared by your configuration.
+### Standalone Home Manager
 
-Standalone Home Manager has no system to apply the overlay and allow unfree
-packages: give it a `pkgs` that does both.
+Without NixOS, nothing applies the overlay or allows unfree packages: give
+Home Manager a `pkgs` that does both, and import the roles.
 
 ```nix
 homeConfigurations.alice = home-manager.lib.homeManagerConfiguration {
   pkgs = import nixpkgs {
     system = "x86_64-linux";
-    overlays = [ opinionated.overlays.default ];
+    overlays = [ nixos-roles.overlays.default ];
     config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "terraform" ];
   };
-  modules = [
-    opinionated.homeModules.roles
+  modules = with nixos-roles.modules.homeManager; [
+    base
+    ops
     {
       home = { username = "alice"; homeDirectory = "/home/alice"; stateVersion = "26.05"; };
-      opinionated.roles = { base.enable = true; ops.enable = true; };
     }
   ];
 };
 ```
 
+### Picking features
+
+Every module can be imported on its own, e.g. `modules.nixos.nh` for the
+store cleanup only. A module imported several times (directly and through a
+platform module, say) is imported once: every published module has a `key`.
+
+## Roles
+
+| Role | Content | Options (`home-manager.users.<name>.roles.<role>`) |
+| :--- | :--- | :--- |
+| `base` | zsh (oh-my-zsh, autosuggestions, syntax highlighting) as login shell, Starship (Catppuccin Mocha), Zellij, git + delta, direnv + nix-direnv, eza, zoxide, fzf, bat, ripgrep, fd, jq, keychain, LazyVim (nix, json, yaml, markdown) | none; the git identity goes in `programs.git.settings.user` |
+| `ops` | kubectl, Helm, Flux, oh-my-zsh kubectl/kubectx/helm/terraform/ansible plugins, LazyVim terraform extra | `azure.enable` (default `false`) |
+| `dev` | IntelliJ IDEA with plugins, `jdt-language-server` for LazyVim | `intellij.enable`, `intellij.plugins` |
+| `llm` | AI CLI of the selected provider; AI plugins in IntelliJ when `dev` is imported too | `provider` (`"github-copilot"`), `intellijPlugins` |
+
+Roles compose: they append to shared lists (oh-my-zsh plugins, LazyVim
+extras and packages, IntelliJ plugins, unfree packages). zsh becomes the
+login shell of the users given `base` through `roles.users`.
+
+## Modules
+
+| `modules.nixos.*` | Provides |
+| :--- | :--- |
+| `wsl` | `core`, plus NixOS-WSL: Windows `$PATH` kept out, Windows GPU driver, `wsl.defaultUser` set to the only user of `roles.users` when there is exactly one. |
+| `core` | `nix`, `nh`, `fonts`, `time-zone` and `roles`: import it alone for a host not covered by a platform (the user accounts are then yours to declare). |
+| `nix` | Flakes + `nix-command`, `configurable-impure-env` (`NIX_CURL_FLAGS`), `root`/`@wheel` trusted users. |
+| `nh` | `programs.nh` with `flake = "/etc/nixos"` and a weekly `nh clean` keeping 14 days, plus store optimisation on the same schedule. |
+| `fonts` | JetBrains Mono Nerd Font. |
+| `time-zone` | `Europe/Paris`. |
+| `roles` | Home Manager (`useGlobalPkgs`, `useUserPackages`) for the users of `roles.users`, with their roles, the overlay and their unfree packages. |
+| `unfree` | `roles.unfreePackages`, the allow list of unfree packages. |
+
+| `modules.homeManager.*` | Provides |
+| :--- | :--- |
+| `base`, `ops`, `dev`, `llm` | The [roles](#roles). |
+| `common` | What the roles share; every role imports it. |
+
+`overlays.default` holds the packages of this flake (see
+[Packages](#packages)); the `roles` module applies it.
+
+### Options
+
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `roles.users.<name>` | — | Roles of the user, who gets a Home Manager configuration. |
+| `roles.unfreePackages` | roles' needs | Allowed unfree package names; add yours here. |
+| `roles.manageUnfreePackages` | `true` | Set to `false` to provide your own `nixpkgs.config.allowUnfreePredicate`. |
+
 ## LazyVim
 
 Neovim comes from [`pfassina/lazyvim-nix`](https://github.com/pfassina/lazyvim-nix):
-plugins and treesitter parsers are resolved by Nix and Mason is disabled.
+Nix resolves the plugins and treesitter parsers, and Mason is disabled.
 `~/.config/nvim` is read-only and `:Lazy update` does nothing; plugins move
 with the `lazyvim` input. Enable more languages from your configuration:
 
@@ -202,28 +183,116 @@ home-manager.users.alice.programs.lazyvim.extras.lang.go = {
 };
 ```
 
+## Packages
+
+The packages of this flake are distributed through `overlays.default`.
+Modules extend them with `.override`:
+
+| Package | Overrides |
+| :--- | :--- |
+| `intellij-idea-with-plugins` | `pluginIds` (JetBrains Marketplace IDs, resolved by [nix-jetbrains-plugins](https://github.com/nix-community/nix-jetbrains-plugins)), `intellij-idea` (e.g. `intellij-idea-oss`) |
+
 ## Development
 
-The flake follows the [dendritic pattern](https://github.com/mightyiam/dendritic):
-every file under `modules/` is a [flake-parts](https://flake.parts) module,
-imported by [import-tree](https://github.com/denful/import-tree) (paths
-containing `/_` are skipped). A file is a feature, which contributes to
-every configuration class it touches, e.g. `modules/roles/base/git.nix`
-declares the NixOS `opinionated.users.<name>.git` options and the Home
-Manager git settings. File names and locations carry no meaning: move or
-split files freely.
+The flake is dendritic: every file under `modules/` is a
+[flake-parts](https://flake.parts) module, imported by
+[import-tree](https://github.com/denful/import-tree) (paths containing `/_`
+are skipped). A file holds one feature and contributes to every module it
+touches; several files may contribute to the same module.
+
+Each file has two levels, which is what takes getting used to:
+
+```nix
+# modules/roles/ops.nix
+{ config, ... }:                                 # flake level: `config.flake.*`
+let
+  inherit (config.flake.modules) homeManager;
+in
+{
+  flake.modules.homeManager.ops =                # stored, evaluated later
+    { config, lib, pkgs, ... }:                  # Home Manager level
+    {
+      imports = [ homeManager.common ];
+      home.packages = [ pkgs.kubectl ];
+    };
+}
+```
+
+The outer function is evaluated with the flake; the inner one is an ordinary
+Home Manager module, kept as a value (a `deferredModule`) until a
+configuration imports it. Its `config` is the user's Home Manager
+configuration, not the flake's.
 
 | Path | Contents |
 | :--- | :--- |
-| `modules/flake-parts.nix` | Systems; publishes `flake.modules.{nixos,homeManager}` as `nixosModules`/`homeModules`. |
-| `modules/roles.nix`, `modules/platforms.nix` | Role and platform registries (`opinionated.roles`, `opinionated.platforms`). |
-| `modules/overlays.nix` | `overlays.default`, applied by the core. |
-| `modules/core/` | System defaults, Home Manager integration, unfree packages. |
-| `modules/roles/`, `modules/platforms/` | One role or platform per file or directory. |
-| `modules/packages/` | One overlay per package of `pkgs/`. |
-| `modules/checks.nix`, `modules/formatter.nix`, `modules/templates.nix` | Check helpers (`checkLib`), formatter, templates. |
+| `modules/flake/` | Flake plumbing: published modules (`flake-parts.nix`), overlays, formatter, templates, checks. |
+| `modules/core/` | The `core` module and the NixOS features it imports. |
+| `modules/platforms/` | One platform module per file, including `core`. |
+| `modules/roles/` | `roles.users` (`users.nix`), unfree packages, and one role per file or directory. |
+| `modules/packages/` | One package per directory: `_package.nix` for `callPackage`, `default.nix` adds it to the overlays. |
+| `templates/` | `nix flake init` templates. |
 
 ```bash
-nix flake check   # evaluates test systems and checks formatting
+nix flake check   # evaluates test configurations and checks formatting
 nix fmt           # formats every Nix file
 ```
+
+To inspect what a module is made of, from a `nix repl`:
+
+```
+:lf .
+:p outputs.modules.homeManager.base
+```
+
+### Adding a role
+
+Create `modules/roles/<name>.nix` (or a directory). Contributing to
+`flake.modules.homeManager.<name>` makes it a role, and a valid value of
+`roles.users.<user>`:
+
+```nix
+{ config, ... }:
+let
+  inherit (config.flake.modules) homeManager;
+in
+{
+  flake.modules.homeManager.data =
+    { pkgs, ... }:
+    {
+      imports = [ homeManager.common ];
+      home.packages = [ pkgs.duckdb ];
+      programs.zsh.oh-my-zsh.plugins = [ "python" ];
+      roles.unfreePackages = [ ];
+    };
+}
+```
+
+Options of the role go under `roles.<name>`. A role needing NixOS settings
+contributes them to `flake.modules.nixos.roles` from the same file (see
+`modules/roles/base/shell.nix`).
+
+### Adding a platform
+
+Create `modules/platforms/<name>.nix`, contributing to
+`flake.modules.nixos.<name>` a module that imports `core`:
+
+```nix
+{ config, ... }:
+let
+  inherit (config.flake.modules) nixos;
+in
+{
+  flake.modules.nixos.bare =
+    { config, lib, ... }:
+    {
+      imports = [ nixos.core ];
+      users.users = lib.mapAttrs (_: _: {
+        isNormalUser = true;
+        extraGroups = [ "wheel" ];
+      }) config.roles.users;
+    };
+}
+```
+
+Then add a configuration to `modules/flake/checks.nix` and, optionally, a
+template.

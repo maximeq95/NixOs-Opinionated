@@ -1,17 +1,20 @@
 # LLM role: AI assistant CLI for the selected provider, plus AI plugins for
-# IntelliJ IDEA when the dev role is enabled.
+# IntelliJ IDEA when the dev role is imported too.
+{ config, ... }:
+let
+  inherit (config.flake.modules) homeManager;
+in
 {
-  opinionated.roles.llm.description = "AI assistant tooling";
-
-  flake.modules.homeManager.roles =
+  flake.modules.homeManager.llm =
     {
       config,
       lib,
+      options,
       pkgs,
       ...
     }:
     let
-      cfg = config.opinionated.roles.llm;
+      cfg = config.roles.llm;
 
       # Each provider lists the packages it installs and the unfree package names
       # they require. Adding a provider means adding an entry here.
@@ -25,7 +28,9 @@
       provider = providers.${cfg.provider};
     in
     {
-      options.opinionated.roles.llm = {
+      imports = [ homeManager.common ];
+
+      options.roles.llm = {
         provider = lib.mkOption {
           type = lib.types.enum (builtins.attrNames providers);
           default = "github-copilot";
@@ -41,15 +46,20 @@
             "com.agentport.jetbrains-acp"
             "com.intellij.air"
           ];
-          description = "AI plugins added to IntelliJ IDEA when the dev role is enabled.";
+          description = "AI plugins added to IntelliJ IDEA when the dev role is imported too.";
         };
       };
 
-      config = lib.mkIf cfg.enable {
-        home.packages = provider.packages;
-        opinionated.unfreePackages = provider.unfree;
-        opinionated.roles.dev.intellij.plugins =
-          lib.mkIf config.opinionated.roles.dev.enable cfg.intellijPlugins;
-      };
+      config = lib.mkMerge [
+        {
+          home.packages = provider.packages;
+          roles.unfreePackages = provider.unfree;
+        }
+        # `roles.dev` only exists when the dev role is imported: `lib.mkIf`
+        # cannot guard an option that may not exist, so its presence is tested.
+        (lib.optionalAttrs (options.roles ? dev) {
+          roles.dev.intellij.plugins = cfg.intellijPlugins;
+        })
+      ];
     };
 }

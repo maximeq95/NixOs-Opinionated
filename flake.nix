@@ -1,5 +1,5 @@
 {
-  description = "Opinionated, modular NixOS and Home Manager configuration with composable user roles";
+  description = "Modular NixOS and Home Manager configuration with composable user roles";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -35,7 +35,7 @@
     };
   };
 
-  # Dendritic pattern: every file under ./modules is a flake-parts module,
-  # imported automatically. See README.md.
+  # Dendritic layout: every file under ./modules is a flake-parts module,
+  # imported automatically (paths containing `/_` are skipped). See README.md.
   outputs = inputs: inputs.flake-parts.lib.mkFlake { inherit inputs; } (inputs.import-tree ./modules);
 }

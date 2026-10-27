@@ -2,21 +2,20 @@
 {
   system.stateVersion = "26.05";
 
-  opinionated = {
-    users.alice = {
-      roles = [
-        "base"
-        "ops"
-        "dev"
-        "llm"
-      ];
-      git = {
-        userName = "Alice";
-        userEmail = "alice@example.com";
-      };
-    };
-  };
+  # Users and their roles: base, ops, dev, llm.
+  roles.users.alice = [
+    "base"
+    "ops"
+    "dev"
+    "llm"
+  ];
 
-  # Role-specific options and any other Home Manager setting:
-  # home-manager.users.alice.opinionated.roles.ops.azure.enable = true;
+  # Role options, like any other Home Manager setting.
+  home-manager.users.alice = {
+    programs.git.settings.user = {
+      name = "Alice";
+      email = "alice@example.com";
+    };
+    # roles.ops.azure.enable = true;
+  };
 }

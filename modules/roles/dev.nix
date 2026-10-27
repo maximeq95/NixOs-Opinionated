@@ -1,8 +1,10 @@
 # Dev role: IntelliJ IDEA (with plugins) and Java tooling for LazyVim.
+{ config, ... }:
+let
+  inherit (config.flake.modules) homeManager;
+in
 {
-  opinionated.roles.dev.description = "IntelliJ IDEA, Java tooling";
-
-  flake.modules.homeManager.roles =
+  flake.modules.homeManager.dev =
     {
       config,
       lib,
@@ -10,10 +12,12 @@
       ...
     }:
     let
-      cfg = config.opinionated.roles.dev;
+      cfg = config.roles.dev;
     in
     {
-      options.opinionated.roles.dev.intellij = {
+      imports = [ homeManager.common ];
+
+      options.roles.dev.intellij = {
         enable = lib.mkOption {
           type = lib.types.bool;
           default = true;
@@ -31,25 +35,23 @@
         };
       };
 
-      config = lib.mkIf cfg.enable (
-        lib.mkMerge [
-          {
-            programs.lazyvim.extraPackages = [ pkgs.jdt-language-server ];
-            opinionated.roles.dev.intellij.plugins = [ "com.intellij.plugins.watcher" ];
-          }
-          (lib.mkIf cfg.intellij.enable {
-            # From `overlays.default`.
-            home.packages = [
-              (pkgs.intellij-idea-with-plugins.override {
-                pluginIds = lib.unique cfg.intellij.plugins;
-              })
-            ];
-            opinionated.unfreePackages = [
-              "intellij-idea"
-              "intellij-idea-with-plugins"
-            ];
-          })
-        ]
-      );
+      config = lib.mkMerge [
+        {
+          programs.lazyvim.extraPackages = [ pkgs.jdt-language-server ];
+          roles.dev.intellij.plugins = [ "com.intellij.plugins.watcher" ];
+        }
+        (lib.mkIf cfg.intellij.enable {
+          # From `overlays.default`.
+          home.packages = [
+            (pkgs.intellij-idea-with-plugins.override {
+              pluginIds = lib.unique cfg.intellij.plugins;
+            })
+          ];
+          roles.unfreePackages = [
+            "intellij-idea"
+            "intellij-idea-with-plugins"
+          ];
+        })
+      ];
     };
 }
