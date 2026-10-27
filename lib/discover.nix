@@ -1,11 +1,8 @@
-# Discovers Home Manager roles from modules/home/roles.
-#
-# Every `<name>.nix` file or `<name>/` directory (with a default.nix) in that
-# folder is a role. A role module must declare `opinionated.roles.<name>`
-# with at least an `enable` option.
+# Discovers the modules of a directory: every `<name>.nix` file or `<name>/`
+# directory (with a default.nix) is an entry named `<name>`.
 { lib }:
+dir:
 let
-  dir = ../modules/home/roles;
   entries = lib.filterAttrs (
     name: type: type == "directory" || (type == "regular" && lib.hasSuffix ".nix" name)
   ) (builtins.readDir dir);

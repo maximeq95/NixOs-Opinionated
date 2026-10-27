@@ -35,10 +35,12 @@
       systems = [ "x86_64-linux" ];
       forAllSystems = lib.genAttrs systems;
 
-      roles = import ./lib/roles.nix { inherit lib; };
+      discover = import ./lib/discover.nix { inherit lib; };
+      roles = discover ./modules/home/roles;
+      platforms = discover ./modules/nixos/platforms;
 
-      # The `key` lets the module system deduplicate a module imported both
-      # directly and through `default`.
+      # The `key` lets the module system deduplicate a module imported several
+      # times, e.g. the core shared by every platform module.
       mkModule = name: module: {
         key = "nixos-opinionated#${name}";
         _file = "${self.outPath}/flake.nix#${name}";
@@ -46,52 +48,34 @@
       };
     in
     {
-      lib = { inherit roles; };
+      lib = { inherit roles platforms; };
 
-      homeModules.default = mkModule "homeModules.default" (
-        import ./modules/home { inherit inputs roles; }
-      );
+      homeModules.roles = mkModule "homeModules.roles" (import ./modules/home { inherit inputs roles; });
 
+      # One module per platform, each including the core. There is
+      # deliberately no `default`: a host has to pick its platform.
       nixosModules = {
-        common = mkModule "nixosModules.common" ./modules/nixos/common.nix;
-        system = mkModule "nixosModules.system" {
+        core = mkModule "nixosModules.core" (
+          import ./modules/nixos/core {
+            inherit inputs roles platforms;
+            homeModule = self.homeModules.roles;
+          }
+        );
+      }
+      // lib.mapAttrs (
+        name: path:
+        mkModule "nixosModules.${name}" {
           imports = [
-            self.nixosModules.common
-            ./modules/nixos/system.nix
+            self.nixosModules.core
+            (import path { inherit inputs; })
           ];
-        };
-        wsl = mkModule "nixosModules.wsl" {
-          imports = [
-            inputs.nixos-wsl.nixosModules.default
-            ./modules/nixos/wsl.nix
-          ];
-        };
-        home = mkModule "nixosModules.home" {
-          imports = [
-            self.nixosModules.common
-            inputs.home-manager.nixosModules.home-manager
-            (import ./modules/nixos/home.nix {
-              inherit roles;
-              homeModule = self.homeModules.default;
-            })
-          ];
-        };
-        default = mkModule "nixosModules.default" {
-          imports = with self.nixosModules; [
-            system
-            wsl
-            home
-          ];
-        };
-      };
+        }
+      ) platforms.modules;
 
-      templates = {
-        wsl = {
-          path = ./templates/wsl;
-          description = "NixOS-WSL host consuming nixos-opinionated";
-        };
-        default = self.templates.wsl;
-      };
+      templates = lib.mapAttrs (name: _: {
+        path = ./templates/${name};
+        description = "NixOS host on the `${name}` platform consuming nixos-opinionated";
+      }) (builtins.readDir ./templates);
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
 

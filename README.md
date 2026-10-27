@@ -1,29 +1,65 @@
 # NixOs-opinionated
 
-Opinionated, modular NixOS + Home Manager configuration, primarily targeting
-[NixOS-WSL](https://github.com/nix-community/NixOS-WSL). Import the modules,
-flip a few `enable` switches, and give each user a list of **roles**.
+Opinionated, modular NixOS + Home Manager configuration. Import the module of
+your **platform** (currently `wsl`), and give each user a list of **roles**.
 
 Every value is a default: anything can be overridden from your own
 configuration (use `lib.mkForce` for values set at normal priority).
 
 ## Modules
 
-| Output | Enable with | Provides |
-| :--- | :--- | :--- |
-| `nixosModules.system` | `opinionated.system.enable` | Flakes + `nix-command`, `configurable-impure-env` (`NIX_CURL_FLAGS`), `root`/`@wheel` trusted users, `nh` with weekly `nh clean` (keeps 14 days) and store optimisation, JetBrains Mono Nerd Font, `Europe/Paris` time zone. |
-| `nixosModules.wsl` | `opinionated.wsl.enable` | NixOS-WSL (module included), Windows `$PATH` kept out, Windows GPU driver, `wsl.defaultUser` set to the only user of `opinionated.users` when exactly one is declared. |
-| `nixosModules.home` | `opinionated.users.<name>` | Home Manager (module included, `useGlobalPkgs`, `useUserPackages`), the roles, zsh as login shell for `base` users, unfree packages allowed per role. |
-| `nixosModules.default` | — | All of the above. |
-| `homeModules.default` | `opinionated.roles.<role>.enable` | The roles, for direct use in Home Manager. |
+A host imports exactly one platform module; there is no default one.
+Importing two platform modules is an evaluation error.
 
-> `nixosModules.wsl` and `nixosModules.home` already import NixOS-WSL and Home
-> Manager: do not import them a second time.
+| Output | Provides |
+| :--- | :--- |
+| `nixosModules.wsl` | The core, plus NixOS-WSL (module included), Windows `$PATH` kept out, Windows GPU driver, `wsl.defaultUser` set to the only user of `opinionated.users` when exactly one is declared. |
+| `nixosModules.core` | Platform-agnostic part, included in every platform module; import it alone for a host not covered by a platform. |
+| `homeModules.roles` | The roles, for standalone Home Manager use (`opinionated.roles.<role>.enable`). |
+
+The core provides:
+
+- **system defaults** (`opinionated.system.enable`, on by default): flakes +
+  `nix-command`, `configurable-impure-env` (`NIX_CURL_FLAGS`), `root`/`@wheel`
+  trusted users, `nh` with weekly `nh clean` (keeps 14 days) and store
+  optimisation, JetBrains Mono Nerd Font, `Europe/Paris` time zone;
+- **Home Manager** (module included, `useGlobalPkgs`, `useUserPackages`) for
+  the users of `opinionated.users`, with their roles, zsh as login shell for
+  `base` users and unfree packages allowed per role.
+
+> The modules already import NixOS-WSL and Home Manager: do not import them a
+> second time.
+
+### Adding a platform
+
+Create `modules/nixos/platforms/<name>.nix`. It is discovered automatically
+and exposed as `nixosModules.<name>` (core included). It is a function of the
+flake inputs returning a module, which must set `opinionated.platform`:
+
+```nix
+{ inputs }:
+{ config, lib, ... }:
+{
+  config = {
+    opinionated.platform = "bare";
+    users.users = lib.mapAttrs (_: _: {
+      isNormalUser = true;
+      extraGroups = [ "wheel" ];
+    }) config.opinionated.users;
+  };
+}
+```
+
+`nix flake check` evaluates every platform with every role enabled; settings a
+platform needs only for that test go in `platformFixtures` in `checks.nix`.
+Add a matching `templates/<name>` directory to get a `nix flake init` template.
 
 ### Options
 
 | Option | Default | Description |
 | :--- | :--- | :--- |
+| `opinionated.platform` | set by the platform module | Read-only platform of the host. |
+| `opinionated.system.enable` | `true` | System defaults. |
 | `opinionated.system.flakePath` | `"/etc/nixos"` | Flake used by `nh os switch` without arguments. |
 | `opinionated.system.clean.{enable,dates,keepSince}` | `true`, `"weekly"`, `"14d"` | Store cleanup schedule. |
 | `opinionated.users.<name>.roles` | `[ "base" ]` | Roles of the user. |
@@ -74,7 +110,7 @@ argument. `nix flake check` evaluates a system with every role enabled.
 ## Usage
 
 ```bash
-nix flake init -t github:pchesneau/NixOs-opinionated
+nix flake init -t github:pchesneau/NixOs-opinionated#wsl
 ```
 
 or, by hand:
@@ -93,16 +129,12 @@ or, by hand:
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        opinionated.nixosModules.default
+        opinionated.nixosModules.wsl
         {
           system.stateVersion = "26.05";
-          opinionated = {
-            system.enable = true;
-            wsl.enable = true;
-            users.alice = {
-              roles = [ "base" "ops" "dev" "llm" ];
-              git = { userName = "Alice"; userEmail = "alice@example.com"; };
-            };
+          opinionated.users.alice = {
+            roles = [ "base" "ops" "dev" "llm" ];
+            git = { userName = "Alice"; userEmail = "alice@example.com"; };
           };
           home-manager.users.alice.opinionated.roles.ops.azure.enable = true;
         }
@@ -112,8 +144,8 @@ or, by hand:
 }
 ```
 
-On a non-WSL host, the user account itself (`users.users.<name>.isNormalUser`,
-…) must be declared by your configuration.
+With `nixosModules.core` alone, the user account itself
+(`users.users.<name>.isNormalUser`, …) must be declared by your configuration.
 
 ## LazyVim
 

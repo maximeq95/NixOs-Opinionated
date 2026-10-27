@@ -1,16 +1,15 @@
-# NixOS-WSL defaults. Requires the NixOS-WSL module (imported by the flake).
+# NixOS-WSL platform.
+{ inputs }:
 { config, lib, ... }:
 let
-  cfg = config.opinionated.wsl;
-  # Declared by the home module; absent when only the WSL module is imported.
-  users = builtins.attrNames (config.opinionated.users or { });
+  users = builtins.attrNames config.opinionated.users;
 in
 {
-  options.opinionated.wsl = {
-    enable = lib.mkEnableOption "opinionated NixOS-WSL defaults";
-  };
+  imports = [ inputs.nixos-wsl.nixosModules.default ];
 
-  config = lib.mkIf cfg.enable {
+  config = {
+    opinionated.platform = "wsl";
+
     wsl = {
       enable = true;
       # The only user declared in `opinionated.users`, if there is exactly one.

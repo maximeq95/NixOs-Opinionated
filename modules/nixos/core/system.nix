@@ -10,7 +10,11 @@ let
 in
 {
   options.opinionated.system = {
-    enable = lib.mkEnableOption "opinionated system-wide NixOS defaults";
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Whether to apply the opinionated system-wide NixOS defaults.";
+    };
 
     flakePath = lib.mkOption {
       type = lib.types.nullOr lib.types.str;

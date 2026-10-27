@@ -3,9 +3,6 @@
   system.stateVersion = "26.05";
 
   opinionated = {
-    system.enable = true;
-    wsl.enable = true;
-
     users.alice = {
       roles = [
         "base"
